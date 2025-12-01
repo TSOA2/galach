@@ -693,13 +693,32 @@ static void gh_emit_while(gh_local_list *pl, gh_ast *ast) {
 	bc->code.nbytes = end;
 }
 
+static gh_type function_return_type;
+static void gh_emit_return(gh_local_list *pl, gh_ast *ast) {
+	if (ast->returnexpr.expr) {
+		gh_type type = GH_TOK_KW_UNIT;
+		gh_emit_expr(pl, ast->returnexpr.expr, &type);
+		if (function_return_type == GH_TOK_KW_UNIT) {
+			gh_log(GH_LOG_ERR, "returning an expression in a function returning unit");
+			COMPILE_FAIL();
+		} else {
+			gh_emit_cast(type, function_return_type);
+		}
+	}
+	emitb(GH_VM_LEAVE);
+	emitb(GH_VM_RET);
+}
+
 static void gh_emit_statement(gh_local_list *pl, gh_ast *ast) {
 	while (ast) {
 		gh_ast *child = ast->statement.child;
 		switch (child->type) {
 			case GH_AST_VAR: gh_emit_var(pl, child); break;
 			case GH_AST_IF:  gh_emit_if(pl, child); break;
+			case GH_AST_MATCH: break;
 			case GH_AST_WHILE: gh_emit_while(pl, child); break;
+			case GH_AST_RETURN: gh_emit_return(pl, child); break;
+			case GH_AST_STATEMENT: gh_emit_block(pl, child); break;
 			default: COMPILE_FAIL(); // unimplemented
 		}
 		ast = ast->statement.statement;
@@ -728,6 +747,7 @@ static void gh_emit_fun(gh_local_list *pl, gh_ast *ast) {
 		.type = ast->fun.type->id,
 		.emitted = 1,
 	});
+	function_return_type = ast->fun.type->id;
 
 	gh_local_list fun_list;
 	gh_init_local_list(&fun_list, pl);
@@ -770,6 +790,8 @@ static void gh_emit_fun(gh_local_list *pl, gh_ast *ast) {
 
 	gh_emit_statement(&fun_list, ast->fun.block);
 
+	// This may be a duplicate for functions that return something at the end,
+	// so that may want to be optimized later
 	emitb(GH_VM_LEAVE);
 	emitb(GH_VM_RET);
 

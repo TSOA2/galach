@@ -130,7 +130,13 @@ static void gh_parse_alpha_str(u64 *size, char **c) {
 }
 
 static inline int gh_cmp_kw(const char *kw, char *start, u64 size) {
-	return strncmp(kw, start, size) == 0;
+	u64 i;
+	for (i = 0; i < size && kw[i] != 0; i++) {
+		if (kw[i] != start[i]) return 0;
+	}
+
+	if (kw[i] != 0) return 0;
+	return 1;
 }
 
 static int gh_parse_kw_or_ident(gh_token *token, char *start, u64 size) {

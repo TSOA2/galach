@@ -101,6 +101,7 @@ static gh_ast *gh_ast_parse_expr(gh_token **tidx);
 
 #define PARSE_BRANCH(name, token, type, succ) \
 static gh_ast *gh_ast_parse_ ## name (gh_token **tidx) { \
+	gh_token *start = *tidx; \
 	gh_ast *child = NULL; \
 	TRY(child, gh_ast_parse_ ## succ (tidx), e0); \
 	if ((*tidx)->id == token) { \
@@ -113,12 +114,15 @@ static gh_ast *gh_ast_parse_ ## name (gh_token **tidx) { \
 	} \
 	return child; \
 e0: \
+	if (is_optional) \
+		*tidx = start; \
 	gh_ast_deinit(child); \
 	return NULL; \
 }
 
 #define PARSE_BRANCH_OP(name, tokens, type, succ) \
 static gh_ast *gh_ast_parse_ ## name (gh_token **tidx) { \
+	gh_token *start = *tidx; \
 	gh_ast *child = NULL; \
 	TRY(child, gh_ast_parse_ ## succ (tidx), e0); \
 	switch ((*tidx)->id) { \
@@ -135,6 +139,8 @@ static gh_ast *gh_ast_parse_ ## name (gh_token **tidx) { \
 	} \
 	return child; \
 e0: \
+	if (is_optional) \
+		*tidx = start; \
 	gh_ast_deinit(child); \
 	return NULL; \
 }
@@ -160,6 +166,7 @@ e0:
 }
 
 static gh_ast *gh_ast_parse_primary(gh_token **tidx) {
+	gh_token *start = *tidx;
 	gh_ast *root = NULL;
 	switch ((*tidx)->id) {
 		case GH_TOK_IDENT:
@@ -184,11 +191,14 @@ static gh_ast *gh_ast_parse_primary(gh_token **tidx) {
 
 	return root;
 e0:
+	if (is_optional)
+		*tidx = start;
 	gh_ast_deinit(root);
 	return NULL;
 }
 
 static gh_ast *gh_ast_parse_unary(gh_token **tidx) {
+	gh_token *start = *tidx;
 	gh_ast *child = NULL;
 	switch ((*tidx)->id) {
 		case GH_TOK_NEG: case GH_TOK_BNEG:
@@ -202,6 +212,9 @@ static gh_ast *gh_ast_parse_unary(gh_token **tidx) {
 	}
 	return child;
 e0:
+	if (is_optional)
+		*tidx = start;
+	gh_ast_deinit(child);
 	return NULL;
 }
 
@@ -249,16 +262,19 @@ e0:
 }
 
 static gh_ast *gh_ast_parse_expr(gh_token **tidx) {
+	int was_optional = is_optional;
 	gh_ast *child;
 	is_optional = 1;
 	if ((child = gh_ast_parse_assgn(tidx)))
 		return child;
 
-	is_optional = 0;
+	is_optional = was_optional;
+
 	if ((child = gh_ast_parse_or(tidx)))
 		return child;
 
-	gh_ast_errexpr(*tidx);
+	if (!is_optional)
+		gh_ast_errexpr(*tidx);
 	return NULL;
 }
 
@@ -354,7 +370,10 @@ static gh_ast *gh_ast_parse_return(gh_token **tidx) {
 	gh_ast *root = NULL;
 	EXPECT((*tidx)++, GH_TOK_KW_RETURN, e0);
 	TRY(root, ALLOC_NODE(GH_AST_RETURN), e0);
-	TRY(root->returnexpr.expr, gh_ast_parse_expr(tidx), e0);
+
+	is_optional = 1;
+	root->returnexpr.expr = gh_ast_parse_expr(tidx);
+	is_optional = 0;
 	return root;
 e0:
 	gh_ast_deinit(root);

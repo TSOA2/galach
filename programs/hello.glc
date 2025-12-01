@@ -1,8 +1,4 @@
-fun main() -> unit begin
-	var y : unit = 5
-	var running : unit = 1
-	while y > 5 && running begin
-		var z : unit = y
-	end
+fun main() -> i64 begin
+	return 5
 end
 
