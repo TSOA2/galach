@@ -1,0 +1,8 @@
+fun main() -> unit begin
+	var y : unit = 5
+	var running : unit = 1
+	while y > 5 && running begin
+		var z : unit = y
+	end
+end
+
