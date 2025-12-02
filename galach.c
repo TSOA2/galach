@@ -29,12 +29,15 @@ int main(int argc, char **argv) {
 		if (argv[i][0] == '-')
 			gh_parse_opt(&argv[i]);
 		else
-			gh_bytecode_src(&bytecode, argv[i]);
+			if (gh_bytecode_src(&bytecode, argv[i]) < 0)
+				return -1;
 	}
 	gh_disas(stderr, &bytecode);
 /*
 	gh_vm vm;
-	gh_vm_init(&vm, &bytecode);
+	if (gh_vm_init(&vm, &bytecode) < 0)
+		return -1;
+
 	gh_vm_run(&vm);
 	gh_vm_deinit(&vm);
 */

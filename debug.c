@@ -333,6 +333,7 @@ static char *op_map[] = {
 	[GH_VM_JZ32] = "jz.dw",
 	[GH_VM_JZ64] = "jz.qw",
 	[GH_VM_JMP] = "jmp",
+	[GH_VM_CALL] = "call",
 	[GH_VM_RET] = "ret",
 };
 static const gh_vm_op last_implemented = GH_VM_RET;
@@ -480,6 +481,7 @@ static void gh_disas_func(FILE *fp, gh_bytecode *bc, gh_function *fun) {
 			SINGLE_A(GH_VM_BNEG_A8);
 
 			case GH_VM_ADD_SP:
+			case GH_VM_CALL:
 				c = gh_disas_offset(fp, b, e);
 				if (c < 0) goto end;
 				break;

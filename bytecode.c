@@ -88,14 +88,14 @@ static i64 offset_counter = 0;
 static int compile_success = 0;
 static jmp_buf compile_end;
 #define COMPILE_FAIL() do { \
-	gh_log(GH_LOG_ERR, "compilation failed from %s", __FUNCTION__); \
+	gh_log(GH_LOG_ERR, "compilation failed from %s, line %d", __FUNCTION__, __LINE__); \
 	longjmp(compile_end, 1); \
 } while (0)
 
 static const u64 local_bs = 8;
 static gh_bytecode *bc;
 
-static int gh_get_type_size(enum gh_token_id type) {
+static i64 gh_get_type_size(gh_type type) {
 	switch (type) {
 		case GH_TOK_KW_UNIT: return 0;
 		case GH_TOK_KW_I8:
@@ -140,7 +140,7 @@ static void gh_init_local_list(gh_local_list *list, gh_local_list *prev) {
 	list->prev = prev;
 }
 
-static i64 gh_calc_offset(int typesize) {
+static i64 gh_calc_offset(i64 typesize) {
 	offset_counter -= typesize;
 	return offset_counter;
 }
@@ -323,6 +323,23 @@ static void gh_emit_cast(gh_type from, gh_type to) {
 	}
 }
 
+#define OP_MULTI(inst) switch (*type) { \
+	MULTI_CASE(inst); \
+	default: COMPILE_FAIL(); \
+}
+
+static void gh_emit_op_push(gh_type *type) {
+	if (*type == GH_TOK_KW_F32 || *type == GH_TOK_KW_F64) COMPILE_FAIL(); // fow now
+	OP_MULTI(GH_VM_PUSH8);
+}
+/*
+static void gh_emit_op_pop(gh_type *type) {
+	i64 typesize = -gh_get_type_size(*type);
+	emitb(GH_VM_ADD_SP);
+	emitqw((u64) typesize);
+}
+*/
+
 static void gh_emit_primary(gh_local_list *pl, gh_ast *ast, gh_type *type) {
 	if (ast->primary.literal->id == GH_TOK_LIT_INT) {
 		switch (*type) {
@@ -397,27 +414,64 @@ static void gh_emit_primary(gh_local_list *pl, gh_ast *ast, gh_type *type) {
 		}
 	} else if (ast->primary.literal->id == GH_TOK_IDENT) {
 		gh_local *local = gh_get_req_local(pl, ast->primary.literal);
-		if (local->id != GH_LOCAL_VAR) {
-			gh_log(GH_LOG_ERR, "can only use a variable identifier in an expression");
-			COMPILE_FAIL();
-		}
-		if (*type == GH_TOK_KW_UNIT)
-			*type = local->type;
+		if (ast->primary.clist) {
+			if (local->id != GH_LOCAL_FUN) {
+				gh_log(GH_LOG_ERR, "can only call a function identifier");
+				COMPILE_FAIL();
+			}
 
-		switch (local->type) {
-			MULTI_CASE(GH_VM_MOV_OFFSET_A8);
-			default: COMPILE_FAIL();
+			if (*type == GH_TOK_KW_UNIT)
+				*type = local->type;
+
+			gh_ast *clist = ast->primary.clist;
+			i64 popsize = 0;
+			i64 nc = 0;
+			for (gh_ast *c = clist; c; c = c->clist.clist) {
+				if (c->clist.expr) nc++;
+			}
+
+			gh_ast **clist_copy = NULL;
+			if (nc) {
+				clist_copy = gh_emit_alloc(nc * sizeof(gh_ast *));
+				for (nc = 0; clist; nc++, clist = clist->clist.clist)
+					clist_copy[nc] = clist->clist.expr;
+
+				for (nc -= 1; nc >= 0; nc--) {
+					if (clist_copy[nc]) {
+						gh_type type = GH_TOK_KW_UNIT;
+						gh_emit_expr(pl, clist_copy[nc], &type);
+						gh_emit_op_push(&type);
+						popsize += gh_get_type_size(type);
+					}
+				}
+			}
+
+			emitb(GH_VM_CALL);
+			emitqw((u64) local->offset);
+			if (popsize) {
+				emitb(GH_VM_ADD_SP);
+				emitqw((u64) popsize);
+			}
+			if (clist_copy)
+				free(clist_copy);
+		} else {
+			if (local->id != GH_LOCAL_VAR) {
+				gh_log(GH_LOG_ERR, "can only use a variable identifier in an expression");
+				COMPILE_FAIL();
+			}
+			if (*type == GH_TOK_KW_UNIT)
+				*type = local->type;
+
+			switch (local->type) {
+				MULTI_CASE(GH_VM_MOV_OFFSET_A8);
+				default: COMPILE_FAIL();
+			}
+			emitqw((u64) local->offset);
+			gh_emit_cast(local->type, *type);
 		}
-		emitqw((u64) local->offset);
-		gh_emit_cast(local->type, *type);
 	} else {
 		COMPILE_FAIL();
 	}
-}
-
-#define OP_MULTI(inst) switch (*type) { \
-	MULTI_CASE(inst); \
-	default: COMPILE_FAIL(); \
 }
 
 static void gh_emit_unary(gh_local_list *pl, gh_ast *ast, gh_type *type) {
@@ -431,11 +485,6 @@ static void gh_emit_unary(gh_local_list *pl, gh_ast *ast, gh_type *type) {
 	} else if (ast->unary.op->id == GH_TOK_BNEG) {
 		OP_MULTI(GH_VM_BNEG_A8);
 	} else { COMPILE_FAIL(); }
-}
-
-static void gh_emit_op_push(gh_type *type) {
-	if (*type == GH_TOK_KW_F32 || *type == GH_TOK_KW_F64) COMPILE_FAIL(); // fow now
-	OP_MULTI(GH_VM_PUSH8);
 }
 
 static void gh_emit_branchop_prefix(gh_local_list *pl, gh_ast *ast, gh_type *type) {
@@ -527,6 +576,8 @@ static void gh_emit_or(gh_local_list *pl, gh_ast *ast, gh_type *type) {
 
 static void gh_emit_assgn(gh_local_list *pl, gh_ast *ast, gh_type *type) {
 	gh_local *local = gh_get_req_local(pl, ast->assgn.ident);
+	if (*type == GH_TOK_KW_UNIT)
+		*type = local->type;
 	if (ast->assgn.op->id == GH_TOK_ASSIGN) {
 		gh_emit_expr(pl, ast->assgn.expr, type);
 		OP_MULTI(GH_VM_MOV_A_OFFSET8);
@@ -618,7 +669,7 @@ static void gh_emit_var(gh_local_list *pl, gh_ast *ast) {
 		emitqw((u64) 0);
 	}
 
-	int typesize = gh_get_type_size(type);
+	i64 typesize = gh_get_type_size(type);
 	i64 offset = gh_calc_offset(typesize);
 	if (!typesize) {
 		gh_log(GH_LOG_ERR, "cannot declare a variable of type unit");
@@ -719,7 +770,7 @@ static void gh_emit_statement(gh_local_list *pl, gh_ast *ast) {
 			case GH_AST_WHILE: gh_emit_while(pl, child); break;
 			case GH_AST_RETURN: gh_emit_return(pl, child); break;
 			case GH_AST_STATEMENT: gh_emit_block(pl, child); break;
-			default: COMPILE_FAIL(); // unimplemented
+			default: gh_emit_expr(pl, child, &(gh_type){GH_TOK_KW_UNIT}); break;
 		}
 		ast = ast->statement.statement;
 	}
@@ -734,10 +785,6 @@ static void gh_emit_fun(gh_local_list *pl, gh_ast *ast) {
 		}
 		if (found->emitted) {
 			gh_log(GH_LOG_ERR, "redeclaration of function");
-			COMPILE_FAIL();
-		}
-		if (found->type != ast->fun.type->id) {
-			gh_log(GH_LOG_ERR, "function return type is incorrect");
 			COMPILE_FAIL();
 		}
 	}
@@ -792,6 +839,8 @@ static void gh_emit_fun(gh_local_list *pl, gh_ast *ast) {
 
 	// This may be a duplicate for functions that return something at the end,
 	// so that may want to be optimized later
+	emitb(GH_VM_MOV_IMM_A64);
+	emitqw(0);
 	emitb(GH_VM_LEAVE);
 	emitb(GH_VM_RET);
 
@@ -834,10 +883,10 @@ void gh_bytecode_mem(gh_bytecode *bytecode, gh_ast *ast) {
 		gh_log(GH_LOG_ERR, "failed to compile ast");
 }
 
-void gh_bytecode_src(gh_bytecode *bytecode, char *file) {
+int gh_bytecode_src(gh_bytecode *bytecode, char *file) {
 	char *src = gh_slurp_src(file);
 	if (!src)
-		return ;
+		return -1;
 	gh_token *tokens = gh_token_init(src);
 	free(src);
 	if (tokens) {
@@ -848,8 +897,12 @@ void gh_bytecode_src(gh_bytecode *bytecode, char *file) {
 		}
 		gh_token_deinit(tokens);
 	}
-	if (!compile_success)
+	if (!compile_success) {
 		gh_log(GH_LOG_ERR, "failed to compile %s", file);
+		return -1;
+	}
+
+	return 0;
 }
 
 void gh_bytecode_deinit(gh_bytecode *bytecode) {

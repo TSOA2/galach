@@ -28,6 +28,6 @@ typedef struct {
 // all indices are within bounds, as well as other stuff.
 void gh_bytecode_init(gh_bytecode *bytecode);
 void gh_bytecode_mem(gh_bytecode *bytecode, gh_ast *ast);
-void gh_bytecode_src(gh_bytecode *bytecode, char *file);
+int gh_bytecode_src(gh_bytecode *bytecode, char *file);
 void gh_bytecode_deinit(gh_bytecode *bytecode);
 #endif // _GALACH_BYTECODE_H

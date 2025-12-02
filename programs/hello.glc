@@ -1,4 +1,9 @@
-fun main() -> i64 begin
+fun y() -> i64 begin
 	return 5
+end
+
+fun main() -> i64 begin
+	var x : unit = y()
+	return 0
 end
 

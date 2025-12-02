@@ -232,7 +232,15 @@ typedef enum {
 	//       ^- op
 	GH_VM_JMP,
 
+	// Call a function at this address
+	// bits: |  8  |  64  |
+	//       ^     ^- address
+	//       ^-op
+	GH_VM_CALL,
+
 	// Return from the function
+	// bits: |  8  |
+	//       ^- op
 	GH_VM_RET,
 } gh_vm_op;
 
@@ -264,7 +272,7 @@ typedef struct {
 	u8 f_lt  : 1;
 } gh_vm;
 
-void gh_vm_init(gh_vm *vm, gh_bytecode *bytecode);
+int gh_vm_init(gh_vm *vm, gh_bytecode *bytecode);
 void gh_vm_run(gh_vm *vm);
 
 void gh_vm_debug(FILE *fp, gh_vm *vm);
