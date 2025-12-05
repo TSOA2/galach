@@ -76,11 +76,9 @@ typedef struct {
 	i64 offset;
 } gh_local;
 
+DEFINE_VEC(gh_local);
 typedef struct gh_local_list {
-	gh_local *locals;
-	u64 used;
-	u64 size;
-
+	VEC(gh_local) locals;
 	struct gh_local_list *prev;
 } gh_local_list;
 
@@ -92,7 +90,6 @@ static jmp_buf compile_end;
 	longjmp(compile_end, 1); \
 } while (0)
 
-static const u64 local_bs = 8;
 static gh_bytecode *bc;
 
 static i64 gh_get_type_size(gh_type type) {
@@ -114,30 +111,15 @@ static i64 gh_get_type_size(gh_type type) {
 	}
 }
 
-static void *gh_emit_alloc(size_t s) {
-	void *p = malloc(s);
-	if (!p) {
-		gh_log(GH_LOG_ERR, "malloc failed: %s", strerror(errno));
-		COMPILE_FAIL();
-	}
-	return p;
-}
-
-static void *gh_emit_realloc(void *prev, size_t s) {
-	void *n = realloc(prev, s);
-	if (!n) {
-		free(prev);
-		gh_log(GH_LOG_ERR, "realloc failed: %s", strerror(errno));
-		COMPILE_FAIL();
-	}
-	return n;
-}
-
 static void gh_init_local_list(gh_local_list *list, gh_local_list *prev) {
-	list->locals = gh_emit_alloc(local_bs * sizeof(gh_local));
-	list->used = 0;
-	list->size = local_bs;
+	list->locals = INIT_VEC(gh_local);
 	list->prev = prev;
+}
+
+static void gh_deinit_local_list(gh_local_list *list) {
+	FREE_VEC(list->locals);
+	if (list->prev)
+		gh_deinit_local_list(list->prev);
 }
 
 static i64 gh_calc_offset(i64 typesize) {
@@ -149,20 +131,15 @@ static i64 gh_calc_offset(i64 typesize) {
 // var x : u32 = 5
 // ^ adds local
 static gh_local *gh_add_local(gh_local_list *list, const gh_local *local) {
-	if (list->used == list->size) {
-		list->size += local_bs;
-		list->locals = gh_emit_realloc(list->locals, list->size * sizeof(gh_local));
-	}
-	gh_local *new_local = &list->locals[list->used++];
-	*new_local = *local;
-	return new_local;
+	APPEND_VEC(list->locals, *local);
+	return LAST_VEC(list->locals);
 }
 
 static gh_local *gh_find_local_depth1(gh_local_list *list, char *name) {
-	for (u64 i = 0; i < list->used; i++) {
-		if (strcmp(list->locals[i].name, name) == 0)
-			return &list->locals[i];
-	}
+	LOOP_VEC(list->locals, local, {
+		if (strcmp(local->name, name) == 0)
+			return local;
+	});
 	return NULL;
 }
 
@@ -187,54 +164,40 @@ static gh_local *gh_get_req_local(gh_local_list *pl, gh_token *ident) {
 	return local;
 }
 
-static const u64 emit_bs = 64;
-static const u64 function_bs = 8;
 static void gh_init_code(void) {
-	bc->code.bytes = gh_emit_alloc(emit_bs);
-	bc->code.nbytes = 0;
-	bc->code.size = emit_bs;
-
-	bc->fun.funs = gh_emit_alloc(function_bs);
-	bc->fun.nfuns = 0;
-	bc->fun.size = function_bs;
+	bc->bytes = INIT_VEC(u8);
+	bc->funs = INIT_VEC(gh_fun);
 }
 
-#define CHECK_EMIT(nb) do { \
-	if (UNLIKELY((bc->code.size - bc->code.nbytes) < (nb))) { \
-		bc->code.size += emit_bs; \
-		bc->code.bytes = gh_emit_realloc(bc->code.bytes, bc->code.size); \
-	} \
-} while (0)
-
 static void emitb(u8 b) {
-	CHECK_EMIT(1);
-	bc->code.bytes[bc->code.nbytes++] = b;
+	GROW_VEC(bc->bytes, 1);
+	APPEND_VEC_RAW(bc->bytes, b);
 }
 
 static void emitw(u16 w) {
-	CHECK_EMIT(2);
-	bc->code.bytes[bc->code.nbytes++] = (w >> 8) & 0xff;
-	bc->code.bytes[bc->code.nbytes++] = (w >> 0) & 0xff;
+	GROW_VEC(bc->bytes, 2);
+	APPEND_VEC_RAW(bc->bytes, (w >> 8) & 0xff);
+	APPEND_VEC_RAW(bc->bytes, (w >> 0) & 0xff);
 }
 
 static void emitdw(u32 dw) {
-	CHECK_EMIT(4);
-	bc->code.bytes[bc->code.nbytes++] = (dw >> 24) & 0xff;
-	bc->code.bytes[bc->code.nbytes++] = (dw >> 16) & 0xff;
-	bc->code.bytes[bc->code.nbytes++] = (dw >> 8) & 0xff;
-	bc->code.bytes[bc->code.nbytes++] = (dw >> 0) & 0xff;
+	GROW_VEC(bc->bytes, 4);
+	APPEND_VEC_RAW(bc->bytes, (dw >> 24) & 0xff);
+	APPEND_VEC_RAW(bc->bytes, (dw >> 16) & 0xff);
+	APPEND_VEC_RAW(bc->bytes, (dw >> 8) & 0xff);
+	APPEND_VEC_RAW(bc->bytes, (dw >> 0) & 0xff);
 }
 
 static void emitqw(u64 qw) {
-	CHECK_EMIT(8);
-	bc->code.bytes[bc->code.nbytes++] = (qw >> 56) & 0xff;
-	bc->code.bytes[bc->code.nbytes++] = (qw >> 48) & 0xff;
-	bc->code.bytes[bc->code.nbytes++] = (qw >> 40) & 0xff;
-	bc->code.bytes[bc->code.nbytes++] = (qw >> 32) & 0xff;
-	bc->code.bytes[bc->code.nbytes++] = (qw >> 24) & 0xff;
-	bc->code.bytes[bc->code.nbytes++] = (qw >> 16) & 0xff;
-	bc->code.bytes[bc->code.nbytes++] = (qw >> 8) & 0xff;
-	bc->code.bytes[bc->code.nbytes++] = (qw >> 0) & 0xff;
+	GROW_VEC(bc->bytes, 8);
+	APPEND_VEC_RAW(bc->bytes, (qw >> 56) & 0xff);
+	APPEND_VEC_RAW(bc->bytes, (qw >> 48) & 0xff);
+	APPEND_VEC_RAW(bc->bytes, (qw >> 40) & 0xff);
+	APPEND_VEC_RAW(bc->bytes, (qw >> 32) & 0xff);
+	APPEND_VEC_RAW(bc->bytes, (qw >> 24) & 0xff);
+	APPEND_VEC_RAW(bc->bytes, (qw >> 16) & 0xff);
+	APPEND_VEC_RAW(bc->bytes, (qw >> 8) & 0xff);
+	APPEND_VEC_RAW(bc->bytes, (qw >> 0) & 0xff);
 }
 
 static void gh_emit_expr(gh_local_list *pl, gh_ast *ast, gh_type *type);
@@ -332,13 +295,6 @@ static void gh_emit_op_push(gh_type *type) {
 	if (*type == GH_TOK_KW_F32 || *type == GH_TOK_KW_F64) COMPILE_FAIL(); // fow now
 	OP_MULTI(GH_VM_PUSH8);
 }
-/*
-static void gh_emit_op_pop(gh_type *type) {
-	i64 typesize = -gh_get_type_size(*type);
-	emitb(GH_VM_ADD_SP);
-	emitqw((u64) typesize);
-}
-*/
 
 static void gh_emit_primary(gh_local_list *pl, gh_ast *ast, gh_type *type) {
 	if (ast->primary.literal->id == GH_TOK_LIT_INT) {
@@ -432,7 +388,7 @@ static void gh_emit_primary(gh_local_list *pl, gh_ast *ast, gh_type *type) {
 
 			gh_ast **clist_copy = NULL;
 			if (nc) {
-				clist_copy = gh_emit_alloc(nc * sizeof(gh_ast *));
+				clist_copy = gh_malloc(nc * sizeof(gh_ast *));
 				for (nc = 0; clist; nc++, clist = clist->clist.clist)
 					clist_copy[nc] = clist->clist.expr;
 
@@ -705,43 +661,43 @@ static void gh_emit_if(gh_local_list *pl, gh_ast *ast) {
 	gh_type *type = &_type;
 	gh_emit_expr(pl, ast->ifexpr.expr, type);
 	OP_MULTI(GH_VM_JZ8);
-	u64 iszero = bc->code.nbytes;
+	u64 iszero = bc->bytes.used;
 	emitqw(0);
 
 	gh_emit_block(pl, ast->ifexpr.statement);
 	emitb(GH_VM_JMP);
-	u64 jmp_cont = bc->code.nbytes;
+	u64 jmp_cont = bc->bytes.used;
 	emitqw(0);
 
-	u64 zero_addr = bc->code.nbytes;
+	u64 zero_addr = bc->bytes.used;
 	if (ast->ifexpr.endif)
 		gh_emit_block(pl, ast->ifexpr.endif);
 
-	u64 end = bc->code.nbytes;
-	bc->code.nbytes = iszero;
+	u64 end = bc->bytes.used;
+	bc->bytes.used = iszero;
 	emitqw(zero_addr);
-	bc->code.nbytes = jmp_cont;
+	bc->bytes.used = jmp_cont;
 	emitqw(end);
-	bc->code.nbytes = end;
+	bc->bytes.used = end;
 }
 
 static void gh_emit_while(gh_local_list *pl, gh_ast *ast) {
 	gh_type _type = GH_TOK_KW_UNIT;
 	gh_type *type = &_type;
-	u64 top = bc->code.nbytes;
+	u64 top = bc->bytes.used;
 	gh_emit_expr(pl, ast->whileexpr.expr, type);
 	OP_MULTI(GH_VM_JZ8);
-	u64 iszero = bc->code.nbytes;
+	u64 iszero = bc->bytes.used;
 	emitqw(0);
 
 	gh_emit_block(pl, ast->whileexpr.block);
 	emitb(GH_VM_JMP);
 	emitqw(top);
 
-	u64 end = bc->code.nbytes;
-	bc->code.nbytes = iszero;
+	u64 end = bc->bytes.used;
+	bc->bytes.used = iszero;
 	emitqw(end);
-	bc->code.nbytes = end;
+	bc->bytes.used = end;
 }
 
 static gh_type function_return_type;
@@ -821,18 +777,14 @@ static void gh_emit_fun(gh_local_list *pl, gh_ast *ast) {
 		flist = flist->flist.flist; // wow I'm so good at naming things
 	}
 
-	if (bc->fun.nfuns == bc->fun.size) {
-		bc->fun.size += function_bs;
-		bc->fun.funs = gh_emit_realloc(bc->fun.funs, bc->fun.size);
-	}
-
-	gh_function *fun = &bc->fun.funs[bc->fun.nfuns++];
-	fun->offset = bc->code.nbytes;
+	APPEND_VEC(bc->funs, (gh_fun){});
+	gh_fun *fun = LAST_VEC(bc->funs);
+	fun->offset = bc->bytes.used;
 
 	emitb(GH_VM_ENTER);
 	emitb(GH_VM_ADD_SP);
 
-	u64 old_nbytes = bc->code.nbytes;
+	u64 old_nbytes = bc->bytes.used;
 	emitqw(0);
 
 	gh_emit_statement(&fun_list, ast->fun.block);
@@ -844,12 +796,12 @@ static void gh_emit_fun(gh_local_list *pl, gh_ast *ast) {
 	emitb(GH_VM_LEAVE);
 	emitb(GH_VM_RET);
 
-	u64 tmp = bc->code.nbytes;
-	bc->code.nbytes = old_nbytes;
+	u64 tmp = bc->bytes.used;
+	bc->bytes.used = old_nbytes;
 	emitqw((u64) offset_counter);
-	bc->code.nbytes = tmp;
+	bc->bytes.used = tmp;
 
-	fun->nbytes = bc->code.nbytes - fun->offset;
+	fun->nbytes = bc->bytes.used - fun->offset;
 	offset_counter = 0;
 }
 
@@ -872,6 +824,7 @@ static void gh_bytecode_compile(gh_bytecode *bytecode, gh_ast *ast) {
 		}
 		decl = decl->decl.decl;
 	}
+	gh_deinit_local_list(&list);
 
 	compile_success = 1;
 }
@@ -887,9 +840,10 @@ int gh_bytecode_src(gh_bytecode *bytecode, char *file) {
 	char *src = gh_slurp_src(file);
 	if (!src)
 		return -1;
-	gh_token *tokens = gh_token_init(src);
+
+	token_v tokens = gh_token_init(src);
 	free(src);
-	if (tokens) {
+	if (!VEC_IS_NULL(tokens)) {
 		gh_ast *ast;
 		if ((ast = gh_ast_init(tokens))) {
 			gh_bytecode_compile(bytecode, ast);
@@ -906,5 +860,6 @@ int gh_bytecode_src(gh_bytecode *bytecode, char *file) {
 }
 
 void gh_bytecode_deinit(gh_bytecode *bytecode) {
-	(void) bytecode;
+	FREE_VEC(bytecode->bytes);
+	FREE_VEC(bytecode->funs);
 }

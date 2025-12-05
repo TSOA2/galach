@@ -3,7 +3,7 @@ fun y() -> i64 begin
 end
 
 fun main() -> i64 begin
-	var x : unit = y()
+	var x : unit = y(5, 2 * 5) * 2
 	return 0
 end
 

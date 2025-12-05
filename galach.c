@@ -4,14 +4,6 @@
 * Designed and implemented by Zachary Gadad (2025)
 */
 
-#ifdef TEST
-#include "tests.h"
-int main(int argc, char **argv) {
-	(void) argc; (void) argv;
-	gh_tests_run();
-	return 0;
-}
-#else
 #include "token.h"
 #include "bytecode.h"
 #include "vm.h"
@@ -44,5 +36,3 @@ int main(int argc, char **argv) {
 	gh_bytecode_deinit(&bytecode);
 	return 0;
 }
-
-#endif // TEST

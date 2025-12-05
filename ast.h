@@ -13,43 +13,6 @@
  *   - Maybe cache friendly? for our purposes that's not really important yet tho
  */
 
-/*
- * program    -> decl EOF
- * decl       -> (function | var) decl
- * function   -> 'fun' IDENT '(' flist ')' '->' type block
- * flist      -> type IDENT ?(',' flist)
- * var        -> 'var' IDENT ':' type ?( '=' expression)
- *
- * statement  -> (var | if | match | while | block | expression) ?(statement)
- * block      -> 'begin' ?(statement) 'end'
- *
- * if         -> 'if' expression ifblock
- * ifblock    -> 'then' ?(statement) endif
- * endif      -> elseif | else | 'end'
- * elseif     -> 'else' if
- * else       -> 'else' ?(statement) 'end'
- *
- * match      -> 'match' ?(IDENT) 'begin' ?(mselect) 'end'
- * mselect    -> expression 'then' ?(statement) 'end' ?(mselect)
- *
- * while      -> 'while' expression block
- *
- * expression -> assignment | or
- * assignment -> IDENT ('=' | '+=' | '-=' | '*=' | '/=' | '%=') expression
- * or         -> and ?('||' or)
- * and        -> bor ?('&&' and)
- * bor        -> bxor ?('|' bor)
- * bxor       -> band ?('^' bxor)
- * band       -> compare ?('&' band)
- * compare    -> relational ?(('==' | '!=') compare)
- * relational -> shifter ?(('<' | '<=' | '>' | '>=') relational)
- * shifter    -> adder ?(('<<' | '>>') shifter)
- * adder      -> factor ?(('+' | '-') adder)
- * factor     -> unary ?(('*' | '/' | '%') factor)
- * unary      -> (('!' | | '~' | '-') unary) | primary
- * primary    -> IDENT | INT | FLOAT | STRING | '(' expression ')'
- */
-
 typedef struct gh_ast {
 	enum gh_ast_type {
 		GH_AST_PRGM,      GH_AST_DECL,
@@ -144,7 +107,7 @@ typedef struct gh_ast {
 	};
 } gh_ast;
 
-gh_ast *gh_ast_init(gh_token *tokens);
+gh_ast *gh_ast_init(token_v tokens);
 void gh_ast_debug(gh_ast *root);
 void gh_ast_deinit(gh_ast *root);
 

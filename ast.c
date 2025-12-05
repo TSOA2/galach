@@ -3,6 +3,7 @@
 #include <string.h>
 #include "ast.h"
 #include "log.h"
+#include "debug.h"
 
 #define TRY(p, x, e) do { \
 	void *_p = (void *) (p = x); \
@@ -483,8 +484,8 @@ e0:
 	return NULL;
 }
 
-gh_ast *gh_ast_init(gh_token *tokens) {
-	gh_token **tidx = &tokens;
+gh_ast *gh_ast_init(token_v tokens) {
+	gh_token **tidx = &tokens.data;
 	gh_ast *root = NULL;
 
 	TRY(root, ALLOC_NODE(GH_AST_PRGM), e0);

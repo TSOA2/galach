@@ -89,14 +89,9 @@ typedef struct {
 	u64 colno;
 } gh_token;
 
-gh_token *gh_token_init(char *c);
-void gh_token_deinit(gh_token *tokens);
+DEFINE_VEC(gh_token);
+typedef VEC(gh_token) token_v;
 
-void gh_token_print(FILE *fp, gh_token *token);
-void gh_token_debug(FILE *fp, gh_token *tokens);
-void gh_token_debug_len(FILE *fp, gh_token *tokens, u64 ntokens);
-
-#ifdef TEST
-int gh_token_cmp(gh_token *one, gh_token *two);
-#endif // TEST
+token_v gh_token_init(char *c);
+void gh_token_deinit(token_v tokens);
 #endif // _GALACH_TOKEN_H

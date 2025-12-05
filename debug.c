@@ -113,20 +113,11 @@ void gh_token_print(FILE *fp, gh_token *token) {
 	}
 }
 
-void gh_token_debug(FILE *fp, gh_token *tokens) {
-	do {
-		gh_token_print(fp, tokens);
+void gh_token_debug(FILE *fp, token_v tokens) {
+	LOOP_VEC(tokens, token, {
+		gh_token_print(fp, token);
 		(void) fputc(' ', fp);
-	} while ((tokens++)->id != GH_TOK_EOF);
-	(void) fputc('\n', fp);
-}
-
-void gh_token_debug_len(FILE *fp, gh_token *tokens, u64 ntokens) {
-	for (u64 i = 0; i < ntokens; i++) {
-		gh_token_print(fp, &tokens[i]);
-		(void) fputc(' ', fp);
-	}
-	(void) fprintf(fp, "%s", token_map[GH_TOK_EOF]);
+	});
 	(void) fputc('\n', fp);
 }
 
@@ -403,16 +394,16 @@ static int gh_disas_addr(FILE *fp, u8 *b, u8 *e) {
 	return 8;
 }
 
-static void gh_disas_func(FILE *fp, gh_bytecode *bc, gh_function *fun) {
+static void gh_disas_func(FILE *fp, gh_bytecode *bc, gh_fun *fun) {
 	(void) fprintf(fp, "\n=== New function ===\n");
-	u8 *b = bc->code.bytes + fun->offset;
+	u8 *b = bc->bytes.data + fun->offset;
 	u8 *e = b + fun->nbytes;
 
 	int c;
 	for (; b < e; b += c) {
 		c = 0;
 
-		(void) fprintf(fp, "0x%lx\t", b - bc->code.bytes);
+		(void) fprintf(fp, "0x%lx\t", b - bc->bytes.data);
 
 		if (*b > last_implemented)
 			(void) fprintf(fp, "unimplemented ");
@@ -501,9 +492,11 @@ static void gh_disas_func(FILE *fp, gh_bytecode *bc, gh_function *fun) {
 		fputc('\n', fp);
 	}
 end:
+	return ;
 }
 
 void gh_disas(FILE *fp, gh_bytecode *bc) {
-	for (u64 i = 0; i < bc->fun.nfuns; i++)
-		gh_disas_func(fp, bc, &bc->fun.funs[i]);
+	LOOP_VEC(bc->funs, fun, {
+		gh_disas_func(fp, bc, fun);
+	});
 }

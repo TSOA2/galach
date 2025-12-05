@@ -1,15 +1,11 @@
-CC := cc
-CFLAGS := -std=c99 -Wall -Wextra -Werror
+CC := gcc
+CFLAGS := -std=gnu99 -Wall -Wextra -Werror
 LFLAGS :=
 
 ifeq ($(MODE), prod)
 	CFLAGS += -O3
 else
 	CFLAGS += -O0 -g -DDEBUG
-endif
-
-ifeq ($(MODE), test)
-	CFLAGS += -DTEST
 endif
 
 SRCS := $(wildcard *.c)

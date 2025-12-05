@@ -9,8 +9,7 @@
 #include <stdio.h>
 
 void gh_token_print(FILE *fp, gh_token *token);
-void gh_token_debug(FILE *fp, gh_token *tokens);
-void gh_token_debug_len(FILE *fp, gh_token *tokens, u64 ntokens);
+void gh_token_debug(FILE *fp, token_v tokens);
 void gh_ast_debug(gh_ast *root);
 void gh_disas(FILE *fp, gh_bytecode *bc);
 

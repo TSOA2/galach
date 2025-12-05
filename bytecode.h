@@ -7,20 +7,15 @@
 typedef struct {
 	u64 offset;
 	u64 nbytes;
-} gh_function;
+} gh_fun;
+
+DEFINE_VEC(gh_fun);
+DEFINE_VEC(u8);
 
 typedef struct {
-	struct {
-		u8 *bytes;
-		u64 nbytes;
-		u64 size;
-	} code;
-	struct {
-		gh_function *funs;
-		u64 nfuns;
-		u64 size;
-		u64 main;
-	} fun;
+	VEC(u8) bytes;
+	VEC(gh_fun) funs;
+	u64 main;
 } gh_bytecode;
 
 // Should implement gh_bytecode_verify

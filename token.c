@@ -39,8 +39,6 @@ static struct gh_keyword_map {
 };
 const u64 keyword_map_size = sizeof(keyword_map)/sizeof(struct gh_keyword_map);
 
-static void gh_token_deinit_len(gh_token *tokens, u64 size);
-
 static inline int gh_is_ws(char c) {
 	return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }
@@ -156,19 +154,11 @@ static int gh_parse_kw_or_ident(gh_token *token, char *start, u64 size) {
 	return 0;
 }
 
-gh_token *gh_token_init(char *c) {
+token_v gh_token_init(char *c) {
 	u64 lineno = 1;
 	char *linestart = c;
 
-	const u64 bs = 32;
-	u64 used = 0;
-	u64 cap  = bs;
-	gh_token *tokens = malloc(cap * sizeof(gh_token));
-	if (!tokens) {
-		gh_log(GH_LOG_ERR, "alloc tokens: %s", strerror(errno));
-		return NULL;
-	}
-
+	MAKE_VEC(gh_token, tokens);
 	for (;;) {
 		if (gh_is_ws(*c)) {
 			if (*c == '\n') {
@@ -177,16 +167,6 @@ gh_token *gh_token_init(char *c) {
 			}
 			c++;
 			continue;
-		}
-
-		if (used == cap) {
-			cap += bs;
-			gh_token *nt = realloc(tokens, cap * sizeof(gh_token));
-			if (!nt) {
-				gh_log(GH_LOG_ERR, "realloc tokens: %s", strerror(errno));
-				goto e0;
-			}
-			tokens = nt;
 		}
 
 		#define CASE(x) case x: switch(*(c+1)) {
@@ -249,7 +229,7 @@ gh_token *gh_token_init(char *c) {
 			}
 		}
 
-		tokens[used++] = token;
+		APPEND_VEC(tokens, token);
 		if (token.id == GH_TOK_EOF)
 			break;
 		c++;
@@ -258,8 +238,8 @@ gh_token *gh_token_init(char *c) {
 	return tokens;
 
 e0:
-	gh_token_deinit_len(tokens, used);
-	return NULL;
+	gh_token_deinit(tokens);
+	return NULL_VEC(gh_token);
 }
 
 static void gh_token_free(gh_token *token) {
@@ -267,40 +247,7 @@ static void gh_token_free(gh_token *token) {
 		free(token->info.str);
 }
 
-static void gh_token_deinit_len(gh_token *tokens, u64 size) {
-	if (!tokens) return ;
-	for (u64 i = 0; i < size; i++)
-		gh_token_free(&tokens[i]);
-	free(tokens);
+void gh_token_deinit(token_v tokens) {
+	LOOP_VEC(tokens, token, { gh_token_free(token); });
+	FREE_VEC(tokens);
 }
-
-void gh_token_deinit(gh_token *tokens) {
-	if (!tokens) return ;
-	gh_token *start = tokens;
-	while (tokens->id != GH_TOK_EOF)
-		gh_token_free(tokens++);
-	free(start);
-}
-
-#ifdef TEST
-int gh_token_cmp(gh_token *one, gh_token *two) {
-	while (one->id != GH_TOK_EOF) {
-		if (one->id != two->id) return 0;
-		switch (one->id) {
-			case GH_TOK_IDENT:
-			case GH_TOK_LIT_STRING:
-				if (strcmp(one->info.str, two->info.str)) return 0;
-				break;
-			case GH_TOK_LIT_INT:
-				if (one->info.i != two->info.i) return 0;
-				break;
-			case GH_TOK_LIT_FLOAT:
-				if (one->info.flt != two->info.flt) return 0;
-				break;
-			default: break;
-		}
-		one++, two++;
-	}
-	return 1;
-}
-#endif // TEST
