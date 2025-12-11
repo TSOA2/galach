@@ -131,6 +131,15 @@ typedef enum {
 	GH_VM_DIV32,
 	GH_VM_DIV64,
 
+	// Pops a value from the stack and gets modulus of a register from this value
+	// bits: |  8  |
+	//       ^- op
+	GH_VM_MOD8,
+	GH_VM_MOD16,
+	GH_VM_MOD32,
+	GH_VM_MOD64,
+
+
 	// === Bit shifting ===
 	// Shifts a value from the stack to the left by the 8-bit value in the a register
 	// bits: |  8  |
@@ -242,16 +251,26 @@ typedef enum {
 	// bits: |  8  |
 	//       ^- op
 	GH_VM_RET,
+
+	// Call a system function
+	// bits: |  8  |  64  |
+	//       ^     ^- index
+	//       ^- op
+	//
+	// System functions are specified in vm.c
+	GH_VM_SYSFUN,
+
+	// Exit the VM
+	// bits: |  8  |
+	//       ^- op
+	GH_VM_EXIT,
 } gh_vm_op;
 
-typedef struct {
+typedef struct gh_vm {
 	gh_bytecode *bc;
-	struct {
-		u8 *b;
-		u64 used;
-		u64 size;
-	} stack;
+	VEC(u8) stack;
 	u64 ip;
+	u64 ip_old;
 	u64 sp;
 	u64 bp;
 	u64 a;
@@ -272,11 +291,10 @@ typedef struct {
 	u8 f_lt  : 1;
 } gh_vm;
 
-int gh_vm_init(gh_vm *vm, gh_bytecode *bytecode);
+void gh_vm_init(gh_vm *vm, gh_bytecode *bytecode);
 void gh_vm_run(gh_vm *vm);
 
 void gh_vm_debug(FILE *fp, gh_vm *vm);
 void gh_vm_deinit(gh_vm *vm);
-
 
 #endif // _GALACH_VM_H

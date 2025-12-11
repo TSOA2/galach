@@ -1,9 +1,11 @@
-fun y() -> i64 begin
-	return 5
+fun test(i32 n) -> unit begin
+	print32(n)
 end
 
-fun main() -> i64 begin
-	var x : unit = y(5, 2 * 5) * 2
-	return 0
+fun main() -> unit begin
+	var n : i32 = 1
+	while n < 10 begin
+		test(n)
+		n += 1
+	end
 end
-

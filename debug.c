@@ -272,6 +272,11 @@ static char *op_map[] = {
 	[GH_VM_DIV32] = "div.dw",
 	[GH_VM_DIV64] = "div.qw",
 
+	[GH_VM_MOD8] = "mod.b",
+	[GH_VM_MOD16] = "mod.w",
+	[GH_VM_MOD32] = "mod.dw",
+	[GH_VM_MOD64] = "mod.qw",
+
 	[GH_VM_LSHIFT8] = "lshift.b",
 	[GH_VM_LSHIFT16] = "lshift.w",
 	[GH_VM_LSHIFT32] = "lshift.dw",
@@ -326,8 +331,10 @@ static char *op_map[] = {
 	[GH_VM_JMP] = "jmp",
 	[GH_VM_CALL] = "call",
 	[GH_VM_RET] = "ret",
+	[GH_VM_SYSFUN] = "sys",
+	[GH_VM_EXIT] = "exit",
 };
-static const gh_vm_op last_implemented = GH_VM_RET;
+static const gh_vm_op last_implemented = GH_VM_EXIT;
 
 #define CHECK_DISAS(b, e, nb) do { \
 	if ((e-b)<(nb)) { \
@@ -482,6 +489,7 @@ static void gh_disas_func(FILE *fp, gh_bytecode *bc, gh_fun *fun) {
 			case GH_VM_JZ32:
 			case GH_VM_JZ64:
 			case GH_VM_JMP:
+			case GH_VM_SYSFUN:
 				c = gh_disas_addr(fp, b, e);
 				if (c < 0) goto end;
 				break;

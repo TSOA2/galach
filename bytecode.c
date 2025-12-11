@@ -60,14 +60,17 @@ typedef union {
 
 typedef enum gh_token_id gh_type;
 
+DEFINE_VEC(gh_type);
 typedef struct {
 	enum gh_local_id {
 		GH_LOCAL_VAR,
 		GH_LOCAL_FUN,
+		GH_LOCAL_SYSFUN,
 	} id;
 
 	char *name;
 	gh_type type;
+	VEC(gh_type) param_types;
 
 	int emitted;
 	// The offset from the base pointer
@@ -170,34 +173,19 @@ static void gh_init_code(void) {
 }
 
 static void emitb(u8 b) {
-	GROW_VEC(bc->bytes, 1);
-	APPEND_VEC_RAW(bc->bytes, b);
+	emitb_vec(bc->bytes, b);
 }
 
 static void emitw(u16 w) {
-	GROW_VEC(bc->bytes, 2);
-	APPEND_VEC_RAW(bc->bytes, (w >> 8) & 0xff);
-	APPEND_VEC_RAW(bc->bytes, (w >> 0) & 0xff);
+	emitw_vec(bc->bytes, w);
 }
 
 static void emitdw(u32 dw) {
-	GROW_VEC(bc->bytes, 4);
-	APPEND_VEC_RAW(bc->bytes, (dw >> 24) & 0xff);
-	APPEND_VEC_RAW(bc->bytes, (dw >> 16) & 0xff);
-	APPEND_VEC_RAW(bc->bytes, (dw >> 8) & 0xff);
-	APPEND_VEC_RAW(bc->bytes, (dw >> 0) & 0xff);
+	emitdw_vec(bc->bytes, dw);
 }
 
 static void emitqw(u64 qw) {
-	GROW_VEC(bc->bytes, 8);
-	APPEND_VEC_RAW(bc->bytes, (qw >> 56) & 0xff);
-	APPEND_VEC_RAW(bc->bytes, (qw >> 48) & 0xff);
-	APPEND_VEC_RAW(bc->bytes, (qw >> 40) & 0xff);
-	APPEND_VEC_RAW(bc->bytes, (qw >> 32) & 0xff);
-	APPEND_VEC_RAW(bc->bytes, (qw >> 24) & 0xff);
-	APPEND_VEC_RAW(bc->bytes, (qw >> 16) & 0xff);
-	APPEND_VEC_RAW(bc->bytes, (qw >> 8) & 0xff);
-	APPEND_VEC_RAW(bc->bytes, (qw >> 0) & 0xff);
+	emitqw_vec(bc->bytes, qw);
 }
 
 static void gh_emit_expr(gh_local_list *pl, gh_ast *ast, gh_type *type);
@@ -296,6 +284,36 @@ static void gh_emit_op_push(gh_type *type) {
 	OP_MULTI(GH_VM_PUSH8);
 }
 
+static void gh_register_sysfuns(gh_local_list *list) {
+	#define ADD_SF(_name, _type, ...) do { \
+		gh_local *tmp = gh_add_local(list, &(const gh_local) { \
+			.id = GH_LOCAL_SYSFUN, \
+			.name = _name, \
+			.type = _type, \
+		}); \
+		const gh_type arr[] = {__VA_ARGS__}; \
+		const u64 narr = sizeof(arr) / sizeof(gh_type); \
+		GROW_VEC(tmp->param_types, narr); \
+		for (u64 i = 0; i < narr; i++) \
+			APPEND_VEC_RAW(tmp->param_types, arr[i]); \
+	} while (0)
+	ADD_SF("print8", GH_TOK_KW_UNIT, GH_TOK_KW_I8);
+	ADD_SF("print16", GH_TOK_KW_UNIT, GH_TOK_KW_I16);
+	ADD_SF("print32", GH_TOK_KW_UNIT, GH_TOK_KW_I32);
+	ADD_SF("print64", GH_TOK_KW_UNIT, GH_TOK_KW_I64);
+}
+
+static u64 get_sysfun(gh_local *local) {
+	#define SF_CHECK(n, num) \
+	if (!strcmp(local->name, n)) { return num; }
+	SF_CHECK("print8", GH_SYSFUN_PRINT8);
+	SF_CHECK("print16", GH_SYSFUN_PRINT16);
+	SF_CHECK("print32", GH_SYSFUN_PRINT32);
+	SF_CHECK("print64", GH_SYSFUN_PRINT64);
+
+	COMPILE_FAIL();
+}
+
 static void gh_emit_primary(gh_local_list *pl, gh_ast *ast, gh_type *type) {
 	if (ast->primary.literal->id == GH_TOK_LIT_INT) {
 		switch (*type) {
@@ -371,7 +389,7 @@ static void gh_emit_primary(gh_local_list *pl, gh_ast *ast, gh_type *type) {
 	} else if (ast->primary.literal->id == GH_TOK_IDENT) {
 		gh_local *local = gh_get_req_local(pl, ast->primary.literal);
 		if (ast->primary.clist) {
-			if (local->id != GH_LOCAL_FUN) {
+			if (local->id != GH_LOCAL_FUN && local->id != GH_LOCAL_SYSFUN) {
 				gh_log(GH_LOG_ERR, "can only call a function identifier");
 				COMPILE_FAIL();
 			}
@@ -379,11 +397,16 @@ static void gh_emit_primary(gh_local_list *pl, gh_ast *ast, gh_type *type) {
 			if (*type == GH_TOK_KW_UNIT)
 				*type = local->type;
 
+			VEC(gh_type) plist = local->param_types;
 			gh_ast *clist = ast->primary.clist;
 			i64 popsize = 0;
 			i64 nc = 0;
-			for (gh_ast *c = clist; c; c = c->clist.clist) {
+			for (gh_ast *c = clist; c; c = c->clist.clist)
 				if (c->clist.expr) nc++;
+			if ((u64) nc != plist.used) {
+				gh_log(GH_LOG_ERR, "expected %llu args to function, got %lld",
+					plist.used, nc);
+				COMPILE_FAIL();
 			}
 
 			gh_ast **clist_copy = NULL;
@@ -394,7 +417,7 @@ static void gh_emit_primary(gh_local_list *pl, gh_ast *ast, gh_type *type) {
 
 				for (nc -= 1; nc >= 0; nc--) {
 					if (clist_copy[nc]) {
-						gh_type type = GH_TOK_KW_UNIT;
+						gh_type type = plist.data[nc];
 						gh_emit_expr(pl, clist_copy[nc], &type);
 						gh_emit_op_push(&type);
 						popsize += gh_get_type_size(type);
@@ -402,8 +425,13 @@ static void gh_emit_primary(gh_local_list *pl, gh_ast *ast, gh_type *type) {
 				}
 			}
 
-			emitb(GH_VM_CALL);
-			emitqw((u64) local->offset);
+			if (local->id == GH_LOCAL_SYSFUN) {
+				emitb(GH_VM_SYSFUN);
+				emitqw(get_sysfun(local));
+			} else {
+				emitb(GH_VM_CALL);
+				emitqw((u64) local->offset);
+			}
 			if (popsize) {
 				emitb(GH_VM_ADD_SP);
 				emitqw((u64) popsize);
@@ -454,7 +482,7 @@ static void gh_emit_factor(gh_local_list *pl, gh_ast *ast, gh_type *type) {
 	switch (ast->branch_op.op->id) {
 		case GH_TOK_MULT: OP_MULTI(GH_VM_MUL8); break;
 		case GH_TOK_DIV: OP_MULTI(GH_VM_DIV8); break;
-		case GH_TOK_MODULO: fallthrough(); // todo
+		case GH_TOK_MODULO: OP_MULTI(GH_VM_MOD8); break;
 		default: COMPILE_FAIL();
 	}
 }
@@ -700,16 +728,16 @@ static void gh_emit_while(gh_local_list *pl, gh_ast *ast) {
 	bc->bytes.used = end;
 }
 
-static gh_type function_return_type;
+static gh_type fun_ret_type;
 static void gh_emit_return(gh_local_list *pl, gh_ast *ast) {
 	if (ast->returnexpr.expr) {
 		gh_type type = GH_TOK_KW_UNIT;
 		gh_emit_expr(pl, ast->returnexpr.expr, &type);
-		if (function_return_type == GH_TOK_KW_UNIT) {
+		if (fun_ret_type == GH_TOK_KW_UNIT) {
 			gh_log(GH_LOG_ERR, "returning an expression in a function returning unit");
 			COMPILE_FAIL();
 		} else {
-			gh_emit_cast(type, function_return_type);
+			gh_emit_cast(type, fun_ret_type);
 		}
 	}
 	emitb(GH_VM_LEAVE);
@@ -744,23 +772,19 @@ static void gh_emit_fun(gh_local_list *pl, gh_ast *ast) {
 			COMPILE_FAIL();
 		}
 	}
-	gh_add_local(pl, &(const gh_local) {
+	gh_local *fun_local = gh_add_local(pl, &(const gh_local) {
 		.id = GH_LOCAL_FUN,
 		.name = ast->fun.ident->info.str,
 		.type = ast->fun.type->id,
 		.emitted = 1,
 	});
-	function_return_type = ast->fun.type->id;
+	fun_ret_type = ast->fun.type->id;
+	fun_local->param_types = INIT_VEC(gh_type);
 
 	gh_local_list fun_list;
 	gh_init_local_list(&fun_list, pl);
 	gh_ast *flist = ast->fun.flist;
-	i64 offset = 8; // 8 bytes to skip over base pointer
-	// | bp | i32 | arg1 | ... ]
-	// ^    ^     ^
-	// ^    ^     ^- bp+12
-	// ^    ^- bp+8
-	// ^- where bp points to (it's also stored there on the stack).
+	i64 offset = 16; // skip base pointer and instruct pointer
 	while (flist) {
 		gh_add_local(&fun_list, &(const gh_local) {
 			.id = GH_LOCAL_VAR,
@@ -773,6 +797,7 @@ static void gh_emit_fun(gh_local_list *pl, gh_ast *ast) {
 			gh_log(GH_LOG_ERR, "cannot have unit type in function parameters");
 			COMPILE_FAIL();
 		}
+		APPEND_VEC(fun_local->param_types, flist->flist.type->id);
 		offset += typesize;
 		flist = flist->flist.flist; // wow I'm so good at naming things
 	}
@@ -789,12 +814,18 @@ static void gh_emit_fun(gh_local_list *pl, gh_ast *ast) {
 
 	gh_emit_statement(&fun_list, ast->fun.block);
 
-	// This may be a duplicate for functions that return something at the end,
-	// so that may want to be optimized later
-	emitb(GH_VM_MOV_IMM_A64);
-	emitqw(0);
-	emitb(GH_VM_LEAVE);
-	emitb(GH_VM_RET);
+	if (!strcmp(fun_local->name, "main")) {
+		bc->main_idx = bc->funs.used - 1;
+		bc->main_defined = 1;
+		emitb(GH_VM_EXIT);
+	} else {
+		// This may be a duplicate for functions that return something at the end,
+		// so that may want to be optimized later
+		emitb(GH_VM_MOV_IMM_A64);
+		emitqw(0);
+		emitb(GH_VM_LEAVE);
+		emitb(GH_VM_RET);
+	}
 
 	u64 tmp = bc->bytes.used;
 	bc->bytes.used = old_nbytes;
@@ -814,6 +845,7 @@ static void gh_bytecode_compile(gh_bytecode *bytecode, gh_ast *ast) {
 
 	gh_local_list list;
 	gh_init_local_list(&list, NULL);
+	gh_register_sysfuns(&list);
 	gh_ast *decl = ast->prgm.decl;
 	while (decl) {
 		gh_ast *child = decl->decl.child;
@@ -826,14 +858,11 @@ static void gh_bytecode_compile(gh_bytecode *bytecode, gh_ast *ast) {
 	}
 	gh_deinit_local_list(&list);
 
-	compile_success = 1;
-}
-
-// for testing purposes
-void gh_bytecode_mem(gh_bytecode *bytecode, gh_ast *ast) {
-	gh_bytecode_compile(bytecode, ast);
-	if (!compile_success)
-		gh_log(GH_LOG_ERR, "failed to compile ast");
+	if (bc->main_defined) {
+		compile_success = 1;
+	} else {
+		gh_log(GH_LOG_ERR, "no main function defined");
+	}
 }
 
 int gh_bytecode_src(gh_bytecode *bytecode, char *file) {
