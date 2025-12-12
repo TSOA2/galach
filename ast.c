@@ -305,15 +305,20 @@ static gh_ast *gh_ast_parse_if(gh_token **tidx) {
 	TRY(root->ifexpr.expr, gh_ast_parse_expr(tidx), e0);
 	EXPECT((*tidx)++, GH_TOK_KW_THEN, e0);
 	TRY(root->ifexpr.statement, gh_ast_parse_statement(tidx), e0);
-	if ((*tidx)->id == GH_TOK_KW_ELSE) {
+
+	gh_ast **endif = &root->ifexpr.endif;
+	while ((*tidx)->id == GH_TOK_KW_ELSE) {
 		(*tidx)++;
-		int is_elseif = (*tidx)->id == GH_TOK_KW_IF;
-		TRY(root->ifexpr.endif, gh_ast_parse_statement(tidx), e0);
-		if (!is_elseif)
-			EXPECT((*tidx)++, GH_TOK_KW_END, e0);
-	} else {
-		EXPECT((*tidx)++, GH_TOK_KW_END, e0);
+		TRY(*endif, ALLOC_NODE(GH_AST_IF), e0);
+		if ((*tidx)->id == GH_TOK_KW_IF) {
+			(*tidx)++;
+			TRY((*endif)->ifexpr.expr, gh_ast_parse_expr(tidx), e0);
+			EXPECT((*tidx)++, GH_TOK_KW_THEN, e0);
+		}
+		TRY((*endif)->ifexpr.statement, gh_ast_parse_statement(tidx), e0);
+		endif = &(*endif)->ifexpr.endif;
 	}
+	EXPECT((*tidx)++, GH_TOK_KW_END, e0);
 	return root;
 e0:
 	gh_ast_deinit(root);

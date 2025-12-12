@@ -3,9 +3,9 @@ fun test(i32 n) -> unit begin
 end
 
 fun main() -> unit begin
-	var n : i32 = 1
-	while n < 10 begin
-		test(n)
-		n += 1
+	var n : u32 = 23598235
+	while n > -10 begin
+		print32(n)
+		n -= 1
 	end
 end

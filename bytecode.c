@@ -687,10 +687,15 @@ static void gh_emit_block(gh_local_list *pl, gh_ast *ast) {
 static void gh_emit_if(gh_local_list *pl, gh_ast *ast) {
 	gh_type _type = GH_TOK_KW_UNIT;
 	gh_type *type = &_type;
-	gh_emit_expr(pl, ast->ifexpr.expr, type);
-	OP_MULTI(GH_VM_JZ8);
+	u8 has_expr = 0;
+	if (ast->ifexpr.expr) {
+		gh_emit_expr(pl, ast->ifexpr.expr, type);
+		OP_MULTI(GH_VM_JZ8);
+		has_expr = 1;
+	}
 	u64 iszero = bc->bytes.used;
-	emitqw(0);
+	if (has_expr)
+		emitqw(0);
 
 	gh_emit_block(pl, ast->ifexpr.statement);
 	emitb(GH_VM_JMP);
@@ -699,11 +704,14 @@ static void gh_emit_if(gh_local_list *pl, gh_ast *ast) {
 
 	u64 zero_addr = bc->bytes.used;
 	if (ast->ifexpr.endif)
-		gh_emit_block(pl, ast->ifexpr.endif);
+		gh_emit_if(pl, ast->ifexpr.endif);
 
 	u64 end = bc->bytes.used;
-	bc->bytes.used = iszero;
-	emitqw(zero_addr);
+	if (has_expr) {
+		bc->bytes.used = iszero;
+		emitqw(zero_addr);
+	}
+
 	bc->bytes.used = jmp_cont;
 	emitqw(end);
 	bc->bytes.used = end;
@@ -875,6 +883,7 @@ int gh_bytecode_src(gh_bytecode *bytecode, char *file) {
 	if (!VEC_IS_NULL(tokens)) {
 		gh_ast *ast;
 		if ((ast = gh_ast_init(tokens))) {
+			//gh_ast_debug(ast);
 			gh_bytecode_compile(bytecode, ast);
 			gh_ast_deinit(ast);
 		}

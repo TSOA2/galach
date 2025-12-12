@@ -36,6 +36,25 @@ void gh_vm_init(gh_vm *vm, gh_bytecode *bytecode) {
 	vm->stack = INIT_VEC(u8);
 }
 
+static void debug_stack(gh_vm *vm) {
+	printf("=== stack debug ===\n");
+	for (u64 i = 0; i < vm->stack.size; i += 16) {
+		u64 limit = i + 16;
+		for (u64 j = i; j < vm->stack.size && j < limit; j++) {
+			if (j == SP && j != vm->bp)
+				printf("\033[96m");
+			else if (j == vm->bp && j != SP)
+				printf("\033[31m");
+			else if (j == vm->bp && j == SP)
+				printf("\033[95m");
+			printf("%.2x ", vm->stack.data[j]);
+			printf("\033[0m");
+		}
+		printf("\n");
+	}
+	printf("=== end debug ===\n");
+}
+
 static u8 get8(gh_vm *vm) {
 	return vm->bc->bytes.data[vm->ip++];
 }
@@ -139,10 +158,10 @@ static void mov_offset_a64(gh_vm *vm, i64 offset) {
 		| ((u64)vm->stack.data[pos+7] << 0);
 }
 
-static void sign_a8(gh_vm *vm) { vm->a |= 0x80; }
-static void sign_a16(gh_vm *vm) { vm->a |= 0x8000; }
-static void sign_a32(gh_vm *vm) { vm->a |= 0x80000000; }
-static void sign_a64(gh_vm *vm) { vm->a |= 0x8000000000000000; }
+static void sign_a8(gh_vm *vm) { vm->a = -A8; }
+static void sign_a16(gh_vm *vm) { vm->a = -A16; }
+static void sign_a32(gh_vm *vm) { vm->a = -A32; }
+static void sign_a64(gh_vm *vm) { vm->a = -A64; }
 
 static void zext_a8_16(gh_vm *vm) { vm->a = A8; }
 static void zext_a16_32(gh_vm *vm) { vm->a = A16; }
@@ -185,28 +204,28 @@ static void push_val8(gh_vm *vm, u8 b) {
 
 static void push_val16(gh_vm *vm, u16 w) {
 	GROW_VEC(vm->stack, 2);
-	APPEND_VEC_RAW(vm->stack, (u8) (w << 8 & 0xff));
-	APPEND_VEC_RAW(vm->stack, (u8) (w << 0 & 0xff));
+	APPEND_VEC_RAW(vm->stack, (u8) (w >> 8 & 0xff));
+	APPEND_VEC_RAW(vm->stack, (u8) (w >> 0 & 0xff));
 }
 
 static void push_val32(gh_vm *vm, u32 dw) {
 	GROW_VEC(vm->stack, 4);
-	APPEND_VEC_RAW(vm->stack, (u8) (dw << 24 & 0xff));
-	APPEND_VEC_RAW(vm->stack, (u8) (dw << 16 & 0xff));
-	APPEND_VEC_RAW(vm->stack, (u8) (dw << 8 & 0xff));
-	APPEND_VEC_RAW(vm->stack, (u8) (dw << 0 & 0xff));
+	APPEND_VEC_RAW(vm->stack, (u8) (dw >> 24 & 0xff));
+	APPEND_VEC_RAW(vm->stack, (u8) (dw >> 16 & 0xff));
+	APPEND_VEC_RAW(vm->stack, (u8) (dw >> 8 & 0xff));
+	APPEND_VEC_RAW(vm->stack, (u8) (dw >> 0 & 0xff));
 }
 
 static void push_val64(gh_vm *vm, u64 qw) {
 	GROW_VEC(vm->stack, 8);
-	APPEND_VEC_RAW(vm->stack, (u8) (qw << 56 & 0xff));
-	APPEND_VEC_RAW(vm->stack, (u8) (qw << 48 & 0xff));
-	APPEND_VEC_RAW(vm->stack, (u8) (qw << 40 & 0xff));
-	APPEND_VEC_RAW(vm->stack, (u8) (qw << 32 & 0xff));
-	APPEND_VEC_RAW(vm->stack, (u8) (qw << 24 & 0xff));
-	APPEND_VEC_RAW(vm->stack, (u8) (qw << 16 & 0xff));
-	APPEND_VEC_RAW(vm->stack, (u8) (qw << 8 & 0xff));
-	APPEND_VEC_RAW(vm->stack, (u8) (qw << 0 & 0xff));
+	APPEND_VEC_RAW(vm->stack, (u8) (qw >> 56 & 0xff));
+	APPEND_VEC_RAW(vm->stack, (u8) (qw >> 48 & 0xff));
+	APPEND_VEC_RAW(vm->stack, (u8) (qw >> 40 & 0xff));
+	APPEND_VEC_RAW(vm->stack, (u8) (qw >> 32 & 0xff));
+	APPEND_VEC_RAW(vm->stack, (u8) (qw >> 24 & 0xff));
+	APPEND_VEC_RAW(vm->stack, (u8) (qw >> 16 & 0xff));
+	APPEND_VEC_RAW(vm->stack, (u8) (qw >> 8 & 0xff));
+	APPEND_VEC_RAW(vm->stack, (u8) (qw >> 0 & 0xff));
 }
 
 static u8 pop_val8(gh_vm *vm) {
@@ -285,10 +304,10 @@ OPFUNS(or, ||) ;
 
 #define CMP_FUN(bits) \
 static void cmp ## bits(gh_vm *vm) { \
-	u ## bits b = pop_val ## bits(vm); \
-	vm->f_gt = b > A ## bits; \
-	vm->f_eql = b == A ## bits; \
-	vm->f_lt = b < A ## bits; \
+	i ## bits b = pop_val ## bits(vm); \
+	vm->f_gt = b > (i ## bits) A ## bits; \
+	vm->f_eql = b == (i ## bits) A ## bits; \
+	vm->f_lt = b < (i ## bits) A ## bits; \
 }
 
 CMP_FUN(8) ; CMP_FUN(16) ; CMP_FUN(32) ; CMP_FUN(64) ;
@@ -513,7 +532,8 @@ end:
 }
 
 void gh_vm_debug(FILE *fp, gh_vm *vm) {
-	(void) fp; (void) vm;
+	(void) fp;
+	debug_stack(vm);
 }
 
 void gh_vm_deinit(gh_vm *vm) {
